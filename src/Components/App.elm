@@ -2,7 +2,8 @@ module Components.App exposing (init, view, update, subscriptions)
 
 import Html exposing (Html, div, span, button, text, h3)
 import Html.Events exposing (onClick)
-import Html.Attributes exposing (class, style)
+import Html.Attributes exposing (class, classList, style, disabled)
+import Html.App as App
 import Http
 import Task exposing (..)
 import Json.Decode as Json exposing ((:=))
@@ -29,16 +30,28 @@ type alias User = {
   lastWatchedEpisode : (Int, Int)
 }
 
-type alias Model = {
+type alias State = {
   episodes : List Episode,
   error : Maybe Http.Error,
   watchers : List User
 }
 
+type alias Model = {
+  state : State,
+  undoStack : List State,
+  redoStack : List State
+}
+
+type InteractMsg =
+  SelectEpisode Episode User
 
 type Msg =
   Load (List Episode)
   | Error Http.Error
+  | PushState State
+  | Undo
+  | Redo
+  | Interact InteractMsg
 
 
 initUser : String -> Int -> (Int, Int) -> User
@@ -46,9 +59,10 @@ initUser name id lastWatchedEpisode =
   User name id lastWatchedEpisode
 
 
-loadEpisodes : Task Http.Error (List Episode)
-loadEpisodes =
-  Http.get decodeEpisodes "http://api.tvmaze.com/shows/167/episodes"
+loadEpisodes : String -> Task Http.Error (List Episode)
+loadEpisodes show =
+  Http.get decodeEpisodes
+    <| "http://api.tvmaze.com/shows/" ++ show ++ "/episodes"
 
 
 decodeEpisodes : Json.Decoder (List Episode)
@@ -64,28 +78,111 @@ decodeEpisodes =
     Json.list episode
 
 
-init : (Model, Cmd Msg)
-init =
+initState : State
+initState =
   { episodes = []
   , error = Nothing
-  , watchers = [ initUser "Sarah" 1 (3, 5), initUser "James" 2 (3, 9) ]
+  , watchers = [ initUser "Sarah" 1 (2, 1), initUser "James" 2 (2, 5) ]
+  }
+
+
+init : (Model, Cmd Msg)
+init =
+  { state = initState
+  , undoStack = []
+  , redoStack = []
   } ! [
-    Task.perform Error Load loadEpisodes
+    Task.perform Error Load (loadEpisodes "167")
   ]
+
+pushState : State -> Cmd Msg
+pushState state =
+  Task.perform identity identity (Task.succeed (PushState state))
+
+
+updateState : Msg -> State -> (State, Cmd Msg)
+updateState msg state =
+  case msg of
+    Load episodes ->
+      { state | episodes = episodes, error = Nothing } ! []
+
+    Error err ->
+      { state | error = Just err } ! []
+
+    Interact msg ->
+      let
+        (newState, stateFx) = updateFromInteraction msg state
+      in
+        newState ! [ stateFx, pushState state ]
+
+    _ -> state ! []
+
+updateFromInteraction : InteractMsg -> State -> (State, Cmd Msg)
+updateFromInteraction msg state =
+  case msg of
+    SelectEpisode episode watcher ->
+      let
+        episodeTuple = (episode.season, episode.number)
+        watchers = state.watchers
+          |> List.map
+            (\user ->
+              if user.id == watcher.id then
+                { user | lastWatchedEpisode = episodeTuple }
+                else user)
+      in
+        { state | watchers = watchers } ! []
 
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
   case msg of
-    Load episodes ->
-      { model | episodes = episodes } ! []
+    PushState state ->
+      { model |
+        undoStack = state :: model.undoStack
+      , redoStack = []
+      } ! []
 
-    Error err ->
-      { model | error = Just err } ! []
+    Undo ->
+      let
+        { state, undoStack, redoStack } = model
+        lastState = List.head undoStack
+      in
+        case lastState of
+          Nothing -> model ! []
+
+          Just rollBackState ->
+            { model |
+              state = rollBackState,
+              undoStack = (List.tail undoStack |> Maybe.withDefault []),
+              redoStack = state :: redoStack
+            } ! []
+
+    Redo ->
+      let
+        { state, undoStack, redoStack } = model
+
+        rollForwardState = List.head redoStack
+      in
+        case rollForwardState of
+          Nothing -> model ! []
+
+          Just rollForwardState ->
+            { model |
+              state = rollForwardState,
+              redoStack = (List.tail redoStack |> Maybe.withDefault []),
+              undoStack = state :: undoStack
+            } ! []
+
+    _ ->
+      let
+        (newState, stateFx) = updateState msg model.state
+      in
+        { model | state = newState } ! [ stateFx ]
 
 
-episodesBySeason : Model -> List Season
-episodesBySeason model =
+
+episodesBySeason : State -> List Season
+episodesBySeason state =
   let
     groupedEpisodes : Dict Int (List Episode)
     groupedEpisodes =
@@ -100,7 +197,7 @@ episodesBySeason model =
             dict
         )
         (Dict.empty)
-        model.episodes
+        state.episodes
   in
     groupedEpisodes
       |> Dict.toList
@@ -110,16 +207,41 @@ episodesBySeason model =
         )
 
 
-view : Model -> Html Msg
 view model =
+  div [ class "container"] [
+    div [ class "row" ] [
+      div [ class "col-md-12" ] [
+        button
+          [ class "btn btn-default"
+          , onClick Undo
+          , disabled (List.isEmpty model.undoStack) ] [
+          text <| "undo (" ++ (toString <| List.length model.undoStack) ++ ")"
+        ],
+        button
+          [ class "btn btn-default"
+          , onClick Redo
+          , disabled (List.isEmpty model.redoStack) ] [
+          text <| "redo (" ++ (toString <| List.length model.redoStack) ++ ")"
+        ]
+      ]
+    ],
+    div [ class "row" ] [
+      div [ class "col-md-12" ] [
+        viewFromState model.state
+      ]
+    ]
+  ]
+
+viewFromState : State -> Html Msg
+viewFromState state =
   let
     errorMsg =
-      case model.error of
+      case state.error of
         Just err -> text "There was an error loading the episodes."
         Nothing -> text ""
 
     lastWatchedSeasons =
-      model.watchers
+      state.watchers
         |> List.map (fst << .lastWatchedEpisode)
 
     lowestSeason : Int
@@ -132,26 +254,23 @@ view model =
     highestSeason =
       lastWatchedSeasons
         |> List.maximum
-        |> Maybe.withDefault 0
+        |> Maybe.withDefault 1
 
 
-    bySeason = episodesBySeason model
+    bySeason = episodesBySeason state
 
-    seasons =
-      List.map
+    seasons = bySeason
+      |> List.filter (.season >> (>=) highestSeason)
+      |> List.map
         (renderSeason {
-          watchers = model.watchers,
+          watchers = state.watchers,
           lowest = lowestSeason,
           highest = highestSeason
-        }) bySeason
+        })
   in
-    div [ class "container" ] [
-      div [ class "row" ] [
-        div [ class "col-md-8 col-md-offset-2" ] [
-          errorMsg
-          , div [] seasons
-        ]
-      ]
+    div [] [
+      errorMsg
+      , div [] seasons
     ]
 
 
@@ -198,10 +317,9 @@ renderSeason { watchers, lowest, highest } seasonObj =
 
 renderEpisode : List User -> Episode -> Html Msg
 renderEpisode watchers episode =
-  div [ class "row" ] [
+  div [ class "row row-hover" ] [
     div [ class "col-xs-8" ] [
-      text episode.name,
-      text <| toString episode.number
+      text episode.name
     ],
     div [ class "col-xs-4" ]
       (List.map (renderWatcher episode) watchers)
@@ -215,15 +333,17 @@ renderWatcher episode watcher =
 
     label = "label-success"
   in
-    if watched then
-      span
-        [ class ("label " ++ label)
-        , style [ ("margin-right", "10px") ]
-        ] [
-          text watcher.name
-        ]
-      else
-        span [] []
+    button
+      [ classList
+        [ ("watcher-btn btn btn-xs", True)
+        , ("btn-success", watched)
+        , ("btn-default not-watched", not watched) ]
+      , style [ ("margin-right", "10px") ]
+      , onClick <| Interact <| SelectEpisode episode watcher
+      ] [
+        text watcher.name
+      ]
+
 
 hasWatched : Episode -> User -> Bool
 hasWatched episode user =
