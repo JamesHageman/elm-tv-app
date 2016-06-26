@@ -1,12 +1,15 @@
 module Components.App exposing (init, view, update, subscriptions)
 
-import Html exposing (Html, div, span, button, text, h3)
+import Html exposing (Html, div, span, button, text, h3, a)
 import Html.Events exposing (onClick)
-import Html.Attributes exposing (class, classList, style, disabled)
+import Html.Attributes exposing (class, classList, style, disabled, href, target)
 import Html.App as App
 import Http
 import Task exposing (..)
-import Json.Decode as Json exposing ((:=))
+
+import Json.Decode as Json exposing (int, string)
+import Json.Decode.Pipeline exposing (decode, required, optional)
+
 import Dict exposing (Dict)
 import Set exposing (Set)
 
@@ -15,7 +18,8 @@ type alias Episode = {
   id : Int,
   name : String,
   season : Int,
-  number : Int
+  number : Int,
+  url : String
 }
 
 
@@ -44,6 +48,7 @@ type alias Model = {
 
 type InteractMsg =
   SelectEpisode Episode User
+  | UnSelectEpisode Episode User
 
 type Msg =
   Load (List Episode)
@@ -65,17 +70,19 @@ loadEpisodes show =
     <| "http://api.tvmaze.com/shows/" ++ show ++ "/episodes"
 
 
+decodeEpisode : Json.Decoder Episode
+decodeEpisode =
+  decode Episode
+    |> required "id" int
+    |> required "name" string
+    |> required "season" int
+    |> required "number" int
+    |> required "url" string
+
+
 decodeEpisodes : Json.Decoder (List Episode)
 decodeEpisodes =
-  let
-    episode =
-      Json.object4 Episode
-        ("id" := Json.int)
-        ("name" := Json.string)
-        ("season" := Json.int)
-        ("number" := Json.int)
-  in
-    Json.list episode
+  Json.list decodeEpisode
 
 
 initState : State
@@ -99,6 +106,15 @@ pushState : State -> Cmd Msg
 pushState state =
   Task.perform identity identity (Task.succeed (PushState state))
 
+
+findLastEpisodeNumber : List Episode -> Int -> Int
+findLastEpisodeNumber episodes season =
+  episodes
+    |> List.filter (.season >> (==) season)
+    |> (\list -> List.drop ((List.length list) - 1) list)
+    |> List.head
+    |> Maybe.map .number
+    |> Maybe.withDefault 0
 
 updateState : Msg -> State -> (State, Cmd Msg)
 updateState msg state =
@@ -132,6 +148,18 @@ updateFromInteraction msg state =
       in
         { state | watchers = watchers } ! []
 
+    UnSelectEpisode episode watcher ->
+      let
+        { season, number } = episode
+        (newSeason, newNumber) = if number > 1 then
+          (season, number - 1)
+          else
+            (season - 1, findLastEpisodeNumber state.episodes (season - 1))
+
+        _ = Debug.log "new" (newSeason, newNumber)
+
+      in
+        state ! []
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
@@ -319,7 +347,7 @@ renderEpisode : List User -> Episode -> Html Msg
 renderEpisode watchers episode =
   div [ class "row row-hover" ] [
     div [ class "col-xs-8" ] [
-      text episode.name
+      a [ href episode.url, target "_blank" ] [ text episode.name ]
     ],
     div [ class "col-xs-4" ]
       (List.map (renderWatcher episode) watchers)
@@ -329,7 +357,11 @@ renderEpisode watchers episode =
 renderWatcher : Episode -> User -> Html Msg
 renderWatcher episode watcher =
   let
+    (season, number) = watcher.lastWatchedEpisode
+
     watched = hasWatched episode watcher
+
+    isLastWatched = episode.season == season && episode.number == number
 
     label = "label-success"
   in
@@ -339,7 +371,11 @@ renderWatcher episode watcher =
         , ("btn-success", watched)
         , ("btn-default not-watched", not watched) ]
       , style [ ("margin-right", "10px") ]
-      , onClick <| Interact <| SelectEpisode episode watcher
+      , disabled (watched && not isLastWatched)
+      , onClick <| Interact
+          <| if isLastWatched then
+            UnSelectEpisode episode watcher
+              else SelectEpisode episode watcher
       ] [
         text watcher.name
       ]
