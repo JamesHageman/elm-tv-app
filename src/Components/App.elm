@@ -37,6 +37,7 @@ type alias User = {
 type alias State = {
   episodes : List Episode,
   error : Maybe Http.Error,
+  currentUserId : Maybe Int,
   watchers : List User
 }
 
@@ -57,6 +58,7 @@ type Msg =
   | Undo
   | Redo
   | Interact InteractMsg
+  | SelectUser Int
 
 
 initUser : String -> Int -> (Int, Int) -> User
@@ -89,6 +91,7 @@ initState : State
 initState =
   { episodes = []
   , error = Nothing
+  , currentUserId = Nothing
   , watchers = [ initUser "Sarah" 1 (2, 1), initUser "James" 2 (2, 5) ]
   }
 
@@ -124,6 +127,9 @@ updateState msg state =
 
     Error err ->
       { state | error = Just err } ! []
+
+    SelectUser id ->
+      { state | currentUserId = Just id } ! []
 
     Interact msg ->
       let
@@ -253,6 +259,9 @@ view model =
         ]
       ]
     ],
+
+    (renderSelectUser model.state),
+
     div [ class "row" ] [
       div [ class "col-md-12" ] [
         viewFromState model.state
@@ -300,6 +309,34 @@ viewFromState state =
       errorMsg
       , div [] seasons
     ]
+
+
+renderSelectUser : State -> Html Msg
+renderSelectUser { watchers, currentUserId } =
+  div [ class "row" ] [
+    div [ class "col-md-12" ] [
+      div [ class "btn-group" ]
+        (List.map (renderUser currentUserId) watchers)
+    ]
+  ]
+
+
+renderUser : Maybe Int -> User -> Html Msg
+renderUser currentUserId user =
+  let
+    isSelected =
+      case currentUserId of
+        Nothing -> False
+
+        Just id -> user.id == id
+  in
+    button
+      [ classList [
+          ("btn", True)
+        , ("btn-primary", isSelected)
+        , ("btn-default", not isSelected) ]
+      , onClick (SelectUser user.id)
+      ] [ text user.name ]
 
 
 renderSeason : { watchers : List User, lowest : Int, highest : Int } -> Season -> Html Msg
