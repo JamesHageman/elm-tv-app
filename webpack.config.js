@@ -65,6 +65,11 @@ if ( TARGET_ENV === 'development' ) {
     module: {
       loaders: [
         {
+          test: /\.js$/,
+          exclude: /node_modules/,
+          loader: 'babel'
+        },
+        {
           test:    /\.elm$/,
           exclude: [/elm-stuff/, /node_modules/],
           loader:  'elm-hot!elm-webpack?verbose=true&warn=true'
@@ -94,6 +99,11 @@ if ( TARGET_ENV === 'production' ) {
 
     module: {
       loaders: [
+        {
+          test: /\.js$/,
+          exclude: /node_modules/,
+          loader: 'babel'
+        },
         {
           test:    /\.elm$/,
           exclude: [/elm-stuff/, /node_modules/],

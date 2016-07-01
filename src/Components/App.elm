@@ -1,4 +1,4 @@
-module Components.App exposing (init, view, update, subscriptions)
+port module Components.App exposing (init, view, update, subscriptions)
 
 import Html exposing (Html, div, span, button, text, h3, a)
 import Html.Events exposing (onClick)
@@ -52,7 +52,8 @@ type InteractMsg =
   | UnSelectEpisode Episode User
 
 type Msg =
-  Load (List Episode)
+  LoadEpisodes (List Episode)
+  | LoadSession FirebaseSession
   | Error Http.Error
   | PushState State
   | Undo
@@ -92,7 +93,7 @@ initState =
   { episodes = []
   , error = Nothing
   , currentUserId = Nothing
-  , watchers = [ initUser "Sarah" 1 (2, 1), initUser "James" 2 (2, 5) ]
+  , watchers = []
   }
 
 
@@ -101,9 +102,7 @@ init =
   { state = initState
   , undoStack = []
   , redoStack = []
-  } ! [
-    Task.perform Error Load (loadEpisodes "167")
-  ]
+  } ! []
 
 pushState : State -> Cmd Msg
 pushState state =
@@ -122,8 +121,14 @@ findLastEpisodeNumber episodes season =
 updateState : Msg -> State -> (State, Cmd Msg)
 updateState msg state =
   case msg of
-    Load episodes ->
+    LoadEpisodes episodes ->
       { state | episodes = episodes, error = Nothing } ! []
+
+    LoadSession { watchers, showId } ->
+      -- let _ = Debug.log "watchers" watchers in state ! []
+      { state | watchers = watchers } ! [
+        Task.perform Error LoadEpisodes (loadEpisodes showId)
+      ]
 
     Error err ->
       { state | error = Just err } ! []
@@ -427,5 +432,17 @@ hasWatched episode user =
       if episode.season == season && episode.number <= number then True else
         False
 
+
+
+type alias FirebaseSession = {
+  watchers : List User,
+  showId : String
+}
+
+port firebaseSession : (FirebaseSession -> msg) -> Sub msg
+
+
+
 subscriptions : Model -> Sub Msg
-subscriptions model = Sub.none
+subscriptions model =
+  firebaseSession LoadSession
