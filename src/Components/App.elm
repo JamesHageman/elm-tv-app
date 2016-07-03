@@ -8,7 +8,7 @@ import Http
 import Task exposing (..)
 
 import Json.Decode as Json exposing (int, string)
-import Json.Decode.Pipeline exposing (decode, required, optional)
+import Json.Decode.Pipeline exposing (decode, required)
 
 import Dict exposing (Dict)
 import Set exposing (Set)
@@ -104,9 +104,13 @@ init =
   , redoStack = []
   } ! []
 
+
 pushState : State -> Cmd Msg
 pushState state =
-  Task.perform identity identity (Task.succeed (PushState state))
+  let
+    pushToUndoStack = Task.succeed (PushState state)
+  in
+    Task.perform identity identity pushToUndoStack
 
 
 findLastEpisodeNumber : List Episode -> Int -> Int
@@ -125,7 +129,6 @@ updateState msg state =
       { state | episodes = episodes, error = Nothing } ! []
 
     LoadSession { watchers, showId } ->
-      -- let _ = Debug.log "watchers" watchers in state ! []
       { state | watchers = watchers } ! [
         Task.perform Error LoadEpisodes (loadEpisodes showId)
       ]
@@ -140,7 +143,7 @@ updateState msg state =
       let
         (newState, stateFx) = updateFromInteraction msg state
       in
-        newState ! [ stateFx, pushState state ]
+        newState ! [ stateFx, pushState state, setFirebaseState { session = "1", watchers = newState.watchers } ]
 
     _ -> state ! []
 
@@ -194,7 +197,7 @@ update msg model =
               state = rollBackState,
               undoStack = (List.tail undoStack |> Maybe.withDefault []),
               redoStack = state :: redoStack
-            } ! []
+            } ! [ setFirebaseState { session = "1", watchers = rollBackState.watchers } ]
 
     Redo ->
       let
@@ -210,7 +213,7 @@ update msg model =
               state = rollForwardState,
               redoStack = (List.tail redoStack |> Maybe.withDefault []),
               undoStack = state :: undoStack
-            } ! []
+            } ! [ setFirebaseState { session = "1", watchers = rollForwardState.watchers } ]
 
     _ ->
       let
@@ -433,15 +436,13 @@ hasWatched episode user =
         False
 
 
-
 type alias FirebaseSession = {
   watchers : List User,
   showId : String
 }
 
+port setFirebaseState : { session: String, watchers: List User } -> Cmd msg
 port firebaseSession : (FirebaseSession -> msg) -> Sub msg
-
-
 
 subscriptions : Model -> Sub Msg
 subscriptions model =

@@ -4,6 +4,13 @@ $icon-font-path: '~bootstrap-sass/assets/fonts/bootstrap/';
 
 // can add Boostrap overrides, additional Sass/CSS below...
 
+.watcher-btn {
+  &:hover {
+    // background-color: $brand-danger;
+    @extend .btn-danger;
+  }
+}
+
 .watcher-btn.not-watched {
   background-color: #eee;
   color: black;

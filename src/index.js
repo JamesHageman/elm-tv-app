@@ -4,9 +4,9 @@ import 'firebase/database';
 
 import './styles/main.scss';
 
-import Elm from './Main';
+import { Main } from './Main';
 
-var config = {
+const config = {
   apiKey: "AIzaSyDitNmfTqVu0B-XCpMMynVJ49hqwPQcU0M",
   authDomain: "elm-tv-app.firebaseapp.com",
   databaseURL: "https://elm-tv-app.firebaseio.com",
@@ -16,9 +16,11 @@ var config = {
 firebase.initializeApp(config);
 
 // inject bundled Elm app into div#main
-const elmApp = Elm.Main.embed( document.getElementById( 'main' ) );
+const elmApp = Main.embed( document.getElementById( 'main' ) );
 
-var ref = firebase.database().ref('sessions/1');
+const db = firebase.database();
+
+const ref = db.ref('sessions/1');
 ref.on('value', (snapshot) => {
   const { usersById, showId } = snapshot.val();
   const watchers = usersById.map((user, i) => {
@@ -32,3 +34,14 @@ ref.on('value', (snapshot) => {
 
   elmApp.ports.firebaseSession.send({ watchers, showId: showId.toString() });
 });
+
+elmApp.ports.setFirebaseState.subscribe(({ session, watchers }) => {
+  const usersRef = db.ref(`sessions/${session}/usersById`);
+  watchers.forEach(({ id, lastWatchedEpisode }) => {
+    const [ season, episode ] = lastWatchedEpisode;
+    usersRef.child(`${id}/lastWatchedEpisode`).set({
+      season,
+      episode
+    });
+  });
+})

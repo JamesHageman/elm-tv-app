@@ -67,7 +67,7 @@ if ( TARGET_ENV === 'development' ) {
         {
           test: /\.js$/,
           exclude: /node_modules/,
-          loader: 'babel'
+          loader: 'babel?cacheDirectory'
         },
         {
           test:    /\.elm$/,
